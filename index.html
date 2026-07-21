@@ -1253,14 +1253,10 @@ function sampleInvoice(){
   try{
     await loadSettings();
     await loadInvoices();
-    if(invoices.length === 0){
-      const ok = await persistInvoice(sampleInvoice());
-      if(ok) await loadInvoices();
-    }
   }catch(e){
     console.error('init failed', e);
   }
-  current = invoices[0] ? JSON.parse(JSON.stringify(invoices[0])) : blankInvoice();
+  current = blankInvoice();
   renderAll();
 })();
 </script>
