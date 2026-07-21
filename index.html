@@ -9,6 +9,8 @@
 <meta name="apple-mobile-web-app-capable" content="yes">
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="請求書アプリ">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 <style>
   @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+JP:wght@400;500;600;700&family=Noto+Serif+JP:wght@600;700&display=swap');
 
@@ -473,10 +475,6 @@
 
   @media print{
     body{ background:#fff; }
-    .sidebar, .toolbar, .form-panel{ display:none !important; }
-    .layout{ display:block; }
-    #printArea{ box-shadow:none; padding:0; max-width:none; }
-    .main{ padding:0; }
   }
 
   /* ---------- Mobile ---------- */
@@ -531,6 +529,60 @@
     .bank-box{ font-size:12px; padding:14px; }
     .bank-box .blabel{ width:76px; }
   }
+
+  /* ---------- Print (A4) — always wins over the mobile screen rules above ---------- */
+  @page{
+    size: A4;
+    margin: 12mm;
+  }
+  @media print{
+    html, body{ background:#fff !important; width:auto !important; }
+    .sidebar, .toolbar, .form-panel, .menu-btn, .overlay{ display:none !important; }
+    .app{ display:block !important; }
+    .main{ padding:0 !important; width:auto !important; }
+    .layout{ display:block !important; max-width:none !important; }
+    .preview-wrap{ width:auto !important; }
+    #printArea{
+      box-shadow:none !important;
+      padding:0 !important;
+      margin:0 !important;
+      max-width:none !important;
+      width:100% !important;
+      font-size:10pt !important;
+    }
+    .doc-title{
+      font-size:22pt !important;
+      letter-spacing:.4em !important;
+      padding-left:.4em !important;
+      padding-top:8pt !important;
+      padding-bottom:8pt !important;
+      margin-bottom:14pt !important;
+    }
+    .doc-date{ font-size:9pt !important; margin-bottom:12pt !important; }
+    .doc-top{ flex-direction:row !important; gap:14pt !important; }
+    .client{
+      min-width:0 !important;
+      width:auto !important;
+      font-size:12pt !important;
+      padding-bottom:8pt !important;
+    }
+    .issuer{ font-size:8pt !important; line-height:1.6 !important; }
+    .subject{ font-size:9.5pt !important; margin:10pt 0 12pt !important; }
+    .amount-box{ margin-bottom:10pt !important; }
+    .amount-box .val{ font-size:18pt !important; padding:10pt !important; }
+    .amount-box .lbl{ font-size:9.5pt !important; padding:10pt 12pt !important; }
+    .lead-text{ font-size:9pt !important; margin:8pt 0 10pt !important; }
+    .due-box .val{ font-size:10.5pt !important; padding:8pt !important; }
+    .due-box .lbl{ font-size:9.5pt !important; padding:8pt 10pt !important; }
+    .section-label{ font-size:9.5pt !important; margin:12pt 0 6pt !important; }
+    table.items{ font-size:9pt !important; margin-bottom:6pt !important; }
+    table.items th, table.items td{ padding:6pt 5pt !important; }
+    table.items tfoot td{ font-size:10pt !important; padding:8pt 5pt !important; }
+    .note-line{ font-size:8pt !important; margin:8pt 0 16pt !important; }
+    .bank-title{ font-size:9.5pt !important; margin-bottom:8pt !important; }
+    .bank-box{ font-size:9pt !important; padding:12pt !important; line-height:1.8 !important; }
+    .bank-box .blabel{ width:65pt !important; }
+  }
 </style>
 </head>
 <body>
@@ -557,6 +609,7 @@
         <button class="action secondary" id="duplicateBtn" style="display:none;">複製して新規作成</button>
         <button class="action danger" id="deleteBtn" style="display:none;">削除</button>
         <button class="action secondary" id="printBtn">印刷 / PDF保存</button>
+        <button class="action secondary" id="emailBtn">📧 PDFをメールで送信</button>
         <button class="action" id="saveBtn">保存</button>
       </div>
     </div>
@@ -1065,6 +1118,82 @@ document.getElementById('deleteBtn').addEventListener('click', async ()=>{
 });
 document.getElementById('printBtn').addEventListener('click', ()=>{
   window.print();
+});
+
+/* ---------- PDF generation + email/share ---------- */
+async function generateInvoicePdf(){
+  if(typeof window.html2canvas === 'undefined' || typeof window.jspdf === 'undefined'){
+    throw new Error('PDF libraries not loaded');
+  }
+  const node = document.getElementById('printArea');
+  const canvas = await window.html2canvas(node, { scale: 2, backgroundColor: '#ffffff', useCORS: true });
+  const imgData = canvas.toDataURL('image/png');
+  const { jsPDF } = window.jspdf;
+  const pdf = new jsPDF({ unit: 'mm', format: 'a4' });
+  const pageWidth = pdf.internal.pageSize.getWidth();
+  const pageHeight = pdf.internal.pageSize.getHeight();
+  const margin = 10;
+  const maxWidth = pageWidth - margin * 2;
+  const maxHeight = pageHeight - margin * 2;
+  let renderWidth = maxWidth;
+  let renderHeight = (canvas.height * renderWidth) / canvas.width;
+  if(renderHeight > maxHeight){
+    renderHeight = maxHeight;
+    renderWidth = (canvas.width * renderHeight) / canvas.height;
+  }
+  const x = (pageWidth - renderWidth) / 2;
+  const y = margin;
+  pdf.addImage(imgData, 'PNG', x, y, renderWidth, renderHeight);
+  return pdf.output('blob');
+}
+
+function invoiceFileName(){
+  const who = (current.client || 'invoice').replace(/[\\/:*?"<>|\s]+/g, '');
+  const d = current.date || '';
+  return `請求書_${who}_${d}.pdf`;
+}
+
+document.getElementById('emailBtn').addEventListener('click', async ()=>{
+  const btn = document.getElementById('emailBtn');
+  const originalText = btn.textContent;
+  btn.textContent = 'PDF作成中…';
+  btn.disabled = true;
+  try{
+    const blob = await generateInvoicePdf();
+    const filename = invoiceFileName();
+    const file = new File([blob], filename, { type: 'application/pdf' });
+
+    if(navigator.canShare && navigator.canShare({ files: [file] })){
+      await navigator.share({
+        files: [file],
+        title: '請求書',
+        text: `${current.client || ''} 様への請求書（${current.subject || ''}）`
+      });
+    } else {
+      // Fallback for browsers without file-sharing support: download the PDF
+      // and open a pre-filled email draft so it can be attached manually.
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(()=> URL.revokeObjectURL(url), 2000);
+
+      const subject = encodeURIComponent(`請求書 - ${current.client || ''}`);
+      const body = encodeURIComponent(`${current.client || ''} 様\n\n請求書を添付いたします。\n（ダウンロードされたPDFファイルをこのメールに添付してください）`);
+      window.location.href = `mailto:?subject=${subject}&body=${body}`;
+    }
+  }catch(e){
+    if(e.name !== 'AbortError'){
+      console.error('email invoice failed', e);
+      alert('PDFの作成に失敗しました。通信状況をご確認の上、もう一度お試しください。');
+    }
+  } finally {
+    btn.textContent = originalText;
+    btn.disabled = false;
+  }
 });
 
 function sampleInvoice(){
