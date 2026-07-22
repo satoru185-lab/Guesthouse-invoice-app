@@ -125,6 +125,17 @@
   }
   .invoice-item:hover{ background:rgba(255,255,255,.13); }
   .invoice-item .who{ font-weight:600; }
+  .type-badge{
+    display:inline-block;
+    font-size:10px;
+    font-weight:700;
+    padding:1px 6px;
+    border-radius:4px;
+    background:var(--accent);
+    color:#1c2333;
+    margin-right:6px;
+    vertical-align:middle;
+  }
   .invoice-item .meta{ color:rgba(255,255,255,.55); font-size:11px; }
   .empty-note{ color:rgba(255,255,255,.4); font-size:12px; }
 
@@ -197,6 +208,27 @@
     padding-bottom:6px;
   }
   .field{ margin-bottom:10px; }
+  .doctype-toggle{
+    display:flex;
+    gap:6px;
+  }
+  .doctype-btn{
+    flex:1;
+    padding:9px 10px;
+    border:1px solid var(--line);
+    background:#fbfbfd;
+    color:var(--muted);
+    border-radius:6px;
+    font-size:13px;
+    font-weight:600;
+    font-family:inherit;
+    cursor:pointer;
+  }
+  .doctype-btn.active{
+    background:var(--navy);
+    border-color:var(--navy);
+    color:#fff;
+  }
   .field label{
     display:block;
     font-size:12px;
@@ -666,6 +698,7 @@ let invoices = [];  // list of {id, value} loaded from storage
 function blankInvoice(){
   return {
     id: uid(),
+    docType: 'invoice',
     date: new Date().toISOString().slice(0,10),
     client: '',
     subject: '',
@@ -776,8 +809,9 @@ function renderList(){
   }
   el.innerHTML = invoices.map(inv=>{
     const t = total(inv);
+    const badge = inv.docType === 'estimate' ? '見積' : '請求';
     return `<div class="invoice-item" data-id="${inv.id}">
-      <div class="who">${inv.client || '（宛先未入力）'}</div>
+      <div class="who"><span class="type-badge">${badge}</span>${inv.client || '（宛先未入力）'}</div>
       <div class="meta">${toReiwa(inv.date)} ・ ${yen(t)}</div>
     </div>`;
   }).join('');
@@ -794,11 +828,20 @@ function renderList(){
 function renderForm(){
   const panel = document.getElementById('formPanel');
   const isSaved = invoices.some(i=>i.id===current.id);
-  document.getElementById('panelTitle').textContent = isSaved ? '請求書を編集' : '新規請求書';
+  const docLabel = current.docType === 'estimate' ? '見積書' : '請求書';
+  document.getElementById('panelTitle').textContent = isSaved ? `${docLabel}を編集` : `新規${docLabel}`;
   document.getElementById('duplicateBtn').style.display = isSaved ? 'inline-block' : 'none';
   document.getElementById('deleteBtn').style.display = isSaved ? 'inline-block' : 'none';
 
   panel.innerHTML = `
+    <div class="form-section">
+      <h3>書類の種類</h3>
+      <div class="doctype-toggle">
+        <button type="button" class="doctype-btn ${current.docType!=='estimate' ? 'active' : ''}" data-type="invoice">請求書</button>
+        <button type="button" class="doctype-btn ${current.docType==='estimate' ? 'active' : ''}" data-type="estimate">見積書</button>
+      </div>
+    </div>
+
     <div class="form-section">
       <h3>宛先・件名</h3>
       <div class="field"><label>宛先（お客様名）</label><input id="f_client" value="${escAttr(current.client)}" placeholder="山田 太郎 様"></div>
@@ -819,6 +862,13 @@ function renderForm(){
 
   renderItems();
 
+  panel.querySelectorAll('.doctype-btn').forEach(btn=>{
+    btn.addEventListener('click', ()=>{
+      current.docType = btn.dataset.type;
+      renderForm();
+      renderPreview();
+    });
+  });
   document.getElementById('f_client').addEventListener('input', e=>{ current.client=e.target.value; renderPreview(); });
   document.getElementById('f_subject').addEventListener('input', e=>{ current.subject=e.target.value; renderPreview(); });
   document.getElementById('f_date').addEventListener('input', e=>{ current.date=e.target.value; renderPreview(); });
@@ -965,8 +1015,9 @@ function renderPreview(){
     }
   }
 
+  const docLabel = current.docType === 'estimate' ? '見積書' : '請求書';
   document.getElementById('printArea').innerHTML = `
-    <div class="doc-title">請求書</div>
+    <div class="doc-title">${docLabel}</div>
     <div class="doc-date">${toReiwa(current.date)}</div>
     <div class="doc-top">
       <div class="client">${escHtml(current.client) || '　'}　様</div>
@@ -1186,9 +1237,10 @@ async function generateInvoicePdf(){
 }
 
 function invoiceFileName(){
+  const docLabel = current.docType === 'estimate' ? '見積書' : '請求書';
   const who = (current.client || 'invoice').replace(/[\\/:*?"<>|\s]+/g, '');
   const d = current.date || '';
-  return `請求書_${who}_${d}.pdf`;
+  return `${docLabel}_${who}_${d}.pdf`;
 }
 
 document.getElementById('emailBtn').addEventListener('click', async ()=>{
@@ -1200,7 +1252,8 @@ document.getElementById('emailBtn').addEventListener('click', async ()=>{
     const blob = await generateInvoicePdf();
     const filename = invoiceFileName();
     const file = new File([blob], filename, { type: 'application/pdf' });
-    const subjectLine = `${current.client || ''} 様への請求書（${current.subject || ''}）`;
+    const docLabel = current.docType === 'estimate' ? '見積書' : '請求書';
+    const subjectLine = `${current.client || ''} 様への${docLabel}（${current.subject || ''}）`;
 
     if(navigator.canShare && navigator.canShare({ files: [file] })){
       await navigator.share({
